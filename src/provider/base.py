@@ -18,13 +18,71 @@ from typing import Any, Optional
 # ---------------------------------------------------------------------------
 
 @dataclass
-class Message:
+class ModelMessage:
     """单条对话消息"""
     role: str   # "system" | "user" | "assistant"
-    content: str
+    content: Optional[str] = None
+    name: Optional[str] = None
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
+    tool_call_id: Optional[str] = None
+    extra: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> dict[str, str]:
-        return {"role": self.role, "content": self.content}
+    def copy(self, **changes: Any) -> "ModelMessage":
+        data = {
+            "role": self.role,
+            "content": self.content,
+            "name": self.name,
+            "tool_calls": [dict(tool_call) for tool_call in self.tool_calls],
+            "tool_call_id": self.tool_call_id,
+            "extra": dict(self.extra),
+        }
+        data.update(changes)
+        return ModelMessage(**data)
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "role": self.role,
+        }
+
+        if self.content is not None:
+            payload["content"] = self.content
+        elif self.tool_calls:
+            payload["content"] = ""
+
+        if self.name:
+            payload["name"] = self.name
+
+        if self.tool_calls:
+            payload["tool_calls"] = [dict(tool_call) for tool_call in self.tool_calls]
+
+        if self.tool_call_id:
+            payload["tool_call_id"] = self.tool_call_id
+
+        for key, value in self.extra.items():
+            if value is not None:
+                payload[key] = value
+
+        return payload
+
+
+@dataclass
+class ModelRequest:
+    """一次模型调用的完整请求结构。"""
+
+    messages: list[ModelMessage]
+    tools: list[dict[str, Any]] = field(default_factory=list)
+    tool_choice: Any = None
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    def copy(self, **changes: Any) -> "ModelRequest":
+        data = {
+            "messages": [message.copy() for message in self.messages],
+            "tools": [dict(tool_schema) for tool_schema in self.tools],
+            "tool_choice": self.tool_choice,
+            "extra": dict(self.extra),
+        }
+        data.update(changes)
+        return ModelRequest(**data)
 
 
 @dataclass
@@ -44,6 +102,7 @@ class LLMResponse:
     content: str
     model: str
     usage: dict[str, int]   # prompt_tokens / completion_tokens / total_tokens
+    message: Optional[ModelMessage] = None
     raw: Any = None         # 保留底层 SDK 原始响应，便于调试
 
 
@@ -76,16 +135,21 @@ class BaseProvider(ABC):
     # ------------------------------------------------------------------
 
     @abstractmethod
-    def _build_request(self, messages: list[Message], **kwargs: Any) -> dict[str, Any]:
-        """将统一的 Message 列表转换为底层 SDK 所需的请求参数字典。
+    def _build_request(self, request: ModelRequest, **kwargs: Any) -> dict[str, Any]:
+        """将统一的 ModelRequest 转换为底层 SDK 所需的请求参数字典。
 
         Args:
-            messages: 对话消息列表。
+            request: 结构化模型请求。
             **kwargs: 运行时覆盖参数（如临时调整 temperature 等）。
 
         Returns:
             可直接传给 SDK 的请求字典。
         """
+
+    def _ensure_request(self, request_or_messages: ModelRequest | list[ModelMessage]) -> ModelRequest:
+        if isinstance(request_or_messages, ModelRequest):
+            return request_or_messages
+        return ModelRequest(messages=[message.copy() for message in request_or_messages])
 
     @abstractmethod
     def _parse_response(self, raw_response: Any) -> LLMResponse:

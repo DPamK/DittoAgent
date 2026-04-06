@@ -11,7 +11,7 @@ from __future__ import annotations
 from abc import abstractmethod
 from typing import Any, Iterator
 
-from .base import BaseProvider, LLMResponse, Message, ProviderConfig
+from .base import BaseProvider, LLMResponse, ModelMessage, ModelRequest, ProviderConfig
 
 
 class SyncBaseProvider(BaseProvider):
@@ -61,14 +61,14 @@ class SyncBaseProvider(BaseProvider):
 
     def chat(
         self,
-        messages: list[Message],
+        request_or_messages: ModelRequest | list[ModelMessage],
         stream: bool = False,
         **kwargs: Any,
     ) -> "LLMResponse | Iterator[str]":
         """统一调用入口。
 
         Args:
-            messages: 对话消息列表。
+            request_or_messages: 结构化请求或对话消息列表。
             stream:   False → 返回完整 LLMResponse；True → 返回逐 token 的 Iterator[str]。
             **kwargs: 运行时覆盖参数（优先级高于 config）。
 
@@ -76,15 +76,16 @@ class SyncBaseProvider(BaseProvider):
             stream=False 时返回 LLMResponse；
             stream=True  时返回 Iterator[str]，可直接 for 循环迭代。
         """
+        request = self._ensure_request(request_or_messages)
         if stream:
-            return self._iter_stream(messages, **kwargs)
-        request = self._build_request(messages, **kwargs)
-        return self._parse_response(self._call_api(request))
+            return self._iter_stream(request, **kwargs)
+        payload = self._build_request(request, **kwargs)
+        return self._parse_response(self._call_api(payload))
 
-    def _iter_stream(self, messages: list[Message], **kwargs: Any) -> Iterator[str]:
+    def _iter_stream(self, request: ModelRequest, **kwargs: Any) -> Iterator[str]:
         """内部辅助：构造流式迭代器。"""
-        request = self._build_request(messages, stream=True, **kwargs)
-        for chunk in self._call_api_stream(request):
+        payload = self._build_request(request, stream=True, **kwargs)
+        for chunk in self._call_api_stream(payload):
             text = self._parse_chunk(chunk)
             if text:
                 yield text

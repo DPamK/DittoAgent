@@ -5,7 +5,8 @@
 ## 目录结构
 
 - `base.py`
-  - `Message`: 统一消息结构
+    - `ModelMessage`: 统一消息结构
+    - `ModelRequest`: 统一请求结构
   - `ProviderConfig`: Provider 默认配置
   - `LLMResponse`: 统一响应结构
   - `BaseProvider`: 通用抽象基类
@@ -16,14 +17,16 @@
 
 ## 核心概念
 
-### 1) Message
+### 1) ModelMessage
 
 ```python
-Message(role="user", content="你好")
+ModelMessage(role="user", content="你好")
 ```
 
 - `role`: 推荐使用 `system` / `user` / `assistant`
 - `content`: 文本内容
+- `name`: 可选消息名，用于兼容具名消息场景
+- `extra`: 发送到底层 provider 的额外字段扩展槽
 
 ### 2) ProviderConfig
 
@@ -42,15 +45,17 @@ ProviderConfig(
 
 ### 3) 统一调用接口 chat
 
-无论同步还是异步，统一使用 `chat(messages, stream=False)`：
+无论同步还是异步，统一使用 `chat(request_or_messages, stream=False)`：
 
 - `stream=False`：返回完整响应 `LLMResponse`
 - `stream=True`：返回流式迭代器（同步 `Iterator[str]`，异步 `AsyncIterator[str]`）
 
+推荐传入 `ModelRequest`，也兼容直接传 `list[ModelMessage]`。
+
 ## 如何使用（同步）
 
 ```python
-from src.provider import Message, ProviderConfig
+from src.provider import ModelMessage, ModelRequest, ProviderConfig
 from your_provider import MySyncProvider
 
 provider = MySyncProvider(
@@ -58,17 +63,19 @@ provider = MySyncProvider(
 )
 
 messages = [
-    Message(role="system", content="你是一个助手"),
-    Message(role="user", content="写一句欢迎词"),
+    ModelMessage(role="system", content="你是一个助手"),
+    ModelMessage(role="user", content="写一句欢迎词"),
 ]
 
+request = ModelRequest(messages=messages)
+
 # 非流式
-resp = provider.chat(messages)
+resp = provider.chat(request)
 print(resp.content)
 print(resp.usage)
 
 # 流式
-for token in provider.chat(messages, stream=True):
+for token in provider.chat(request, stream=True):
     print(token, end="")
 ```
 
@@ -77,7 +84,7 @@ for token in provider.chat(messages, stream=True):
 ```python
 import asyncio
 
-from src.provider import Message, ProviderConfig
+from src.provider import ModelMessage, ModelRequest, ProviderConfig
 from your_provider import MyAsyncProvider
 
 
@@ -87,16 +94,18 @@ async def main() -> None:
     )
 
     messages = [
-        Message(role="system", content="你是一个助手"),
-        Message(role="user", content="写一句欢迎词"),
+        ModelMessage(role="system", content="你是一个助手"),
+        ModelMessage(role="user", content="写一句欢迎词"),
     ]
 
+    request = ModelRequest(messages=messages)
+
     # 非流式
-    resp = await provider.chat(messages)
+    resp = await provider.chat(request)
     print(resp.content)
 
     # 流式
-    stream_iter = await provider.chat(messages, stream=True)
+    stream_iter = await provider.chat(request, stream=True)
     async for token in stream_iter:
         print(token, end="")
 
@@ -115,7 +124,7 @@ from typing import Any, Iterator
 
 from src.provider import (
     LLMResponse,
-    Message,
+    ModelMessage,
     ProviderConfig,
     SyncBaseProvider,
 )
@@ -127,8 +136,8 @@ class MySyncProvider(SyncBaseProvider):
         # 在这里初始化你的 SDK Client
         # 例如: self.client = SomeClient(api_key=...)
 
-    def _build_request(self, messages: list[Message], **kwargs: Any) -> dict[str, Any]:
-        # 1) 将通用 Message 转成 SDK 需要的格式
+    def _build_request(self, messages: list[ModelMessage], **kwargs: Any) -> dict[str, Any]:
+        # 1) 将通用 ModelMessage 转成 SDK 需要的格式
         sdk_messages = [m.to_dict() for m in messages]
 
         # 2) 配置默认参数 + 调用时覆盖参数
@@ -184,7 +193,7 @@ from typing import Any, AsyncIterator
 from src.provider import (
     AsyncBaseProvider,
     LLMResponse,
-    Message,
+    ModelMessage,
     ProviderConfig,
 )
 
@@ -194,7 +203,7 @@ class MyAsyncProvider(AsyncBaseProvider):
         super().__init__(config)
         # 初始化异步 SDK Client
 
-    def _build_request(self, messages: list[Message], **kwargs: Any) -> dict[str, Any]:
+    def _build_request(self, messages: list[ModelMessage], **kwargs: Any) -> dict[str, Any]:
         sdk_messages = [m.to_dict() for m in messages]
         req = {
             "model": self.config.model,

@@ -16,22 +16,29 @@ import importlib
 from typing import Any, AsyncIterator, Iterator
 
 from .async_base import AsyncBaseProvider
-from .base import LLMResponse, Message, ProviderConfig
+from .base import LLMResponse, ModelMessage, ModelRequest, ProviderConfig
 from .sync_base import SyncBaseProvider
 
 
 class _OpenAIMixin:
     """OpenAI 公共实现片段，供同步/异步 Provider 复用。"""
 
-    def _build_request(self, messages: list[Message], **kwargs: Any) -> dict[str, Any]:
+    def _build_request(self, request: ModelRequest, **kwargs: Any) -> dict[str, Any]:
         req: dict[str, Any] = {
             "model": self.config.model,
-            "messages": [m.to_dict() for m in messages],
+            "messages": [m.to_dict() for m in request.messages],
             "temperature": self.config.temperature,
             "top_p": self.config.top_p,
             **self.config.extra_kwargs,
+            **request.extra,
             **kwargs,
         }
+
+        if request.tools:
+            req["tools"] = [dict(tool_schema) for tool_schema in request.tools]
+
+        if request.tool_choice is not None and "tool_choice" not in req:
+            req["tool_choice"] = request.tool_choice
 
         if self.config.max_tokens is not None and "max_tokens" not in req:
             req["max_tokens"] = self.config.max_tokens
@@ -40,11 +47,21 @@ class _OpenAIMixin:
 
     def _parse_response(self, raw_response: Any) -> LLMResponse:
         content = ""
+        parsed_message: ModelMessage | None = None
         if getattr(raw_response, "choices", None):
             first_choice = raw_response.choices[0]
             message = getattr(first_choice, "message", None)
             if message is not None:
                 content = getattr(message, "content", "") or ""
+                tool_calls_raw = getattr(message, "tool_calls", None) or []
+                normalized_content = getattr(message, "content", None)
+                if normalized_content is None and tool_calls_raw:
+                    normalized_content = ""
+                parsed_message = ModelMessage(
+                    role=getattr(message, "role", "assistant") or "assistant",
+                    content=normalized_content,
+                    tool_calls=[tc.model_dump() if hasattr(tc, "model_dump") else dict(tc) for tc in tool_calls_raw],
+                )
 
         usage_obj = getattr(raw_response, "usage", None)
         usage = {
@@ -54,7 +71,7 @@ class _OpenAIMixin:
         }
 
         model = getattr(raw_response, "model", self.config.model)
-        return LLMResponse(content=content, model=model, usage=usage, raw=raw_response)
+        return LLMResponse(content=content, model=model, usage=usage, message=parsed_message, raw=raw_response)
 
     def _parse_chunk(self, chunk: Any) -> str:
         choices = getattr(chunk, "choices", None)
