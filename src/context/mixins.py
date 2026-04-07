@@ -49,7 +49,11 @@ class MessageMetadataMixin(MessageTransformMixin):
 
 
 class ToolsContextMixin(RenderTransformMixin):
-    """Tools 相关渲染增强扩展点。"""
+    """Tools 相关渲染增强扩展点。
+
+    默认模式下，工具 schema 通过 render() 主链路下发到 ModelRequest.tools。
+    prompt 模式仅作为兼容降级路径保留，会在最终消息阶段注入工具说明。
+    """
 
     def __init__(
         self,
@@ -74,13 +78,13 @@ class ToolsContextMixin(RenderTransformMixin):
         return items
 
     def build_tool_messages(self) -> list[ModelMessage]:
-        """兼容降级模式：将 tools 注入为消息。"""
+        """兼容降级路径：将工具描述转换为消息注入。"""
         return []
 
     def _render_tools(self, items: list[ContextEntry]) -> list[dict[str, Any]]:
         if self._tool_render_mode != "native":
             return []
-        return self.get_tool_schemas()
+        return self._tool_registry.schemas()
 
     def _finalize_rendered_messages(self, messages: list[ModelMessage]) -> list[ModelMessage]:
         messages = super()._finalize_rendered_messages(messages)
@@ -90,12 +94,6 @@ class ToolsContextMixin(RenderTransformMixin):
         if not tool_messages:
             return messages
         return [*tool_messages, *messages]
-
-    def _finalize_rendered_request(self, request: ModelRequest) -> ModelRequest:
-        request = super()._finalize_rendered_request(request)
-        if self._tool_render_mode == "native":
-            return request.copy(tools=self.get_tool_schemas())
-        return request
 
     def register_tool(self, tool: BaseTool | Callable[..., Any], *, replace: bool = False) -> BaseTool:
         return self._tool_registry.register(ensure_tool(tool), replace=replace)
@@ -117,12 +115,6 @@ class ToolsContextMixin(RenderTransformMixin):
     def list_tools(self) -> list[BaseTool]:
         return self._tool_registry.list()
 
-    def render_tools(self) -> list[dict[str, Any]]:
-        return self._tool_registry.schemas()
-
-    def get_tool_schemas(self) -> list[dict[str, Any]]:
-        return self.render_tools()
-
     def invoke_tool(
         self,
         name: str,
@@ -135,7 +127,11 @@ class ToolsContextMixin(RenderTransformMixin):
 
 
 class SkillsContextMixin(RenderTransformMixin):
-    """Skills 相关渲染增强扩展点。"""
+    """Skills 相关渲染增强扩展点。
+
+    新扩展应优先在 ContextEntry 语义层注入 skills；最终消息阶段的注入
+    仅保留给需要兼容既有 prompt 结构的场景。
+    """
 
     def transform_render_items(self, items: list[ContextEntry]) -> list[ContextEntry]:
         items = super().transform_render_items(items)
@@ -153,5 +149,5 @@ class SkillsContextMixin(RenderTransformMixin):
         return items
 
     def build_skill_messages(self) -> list[ModelMessage]:
-        """返回需要注入到渲染结果中的 skills 消息。"""
+        """兼容降级路径：返回需要注入到最终消息中的 skills 消息。"""
         return []

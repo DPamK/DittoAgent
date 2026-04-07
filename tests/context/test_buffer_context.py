@@ -1,5 +1,6 @@
 from src.context import (
     ContextEntry,
+    ContextTransport,
     ConversationBufferContext,
     MessageMetadataMixin,
     SkillsContextMixin,
@@ -41,6 +42,93 @@ def test_context_keeps_internal_metadata_separate_from_provider_messages() -> No
 
     assert context.items[0].metadata["source"] == "input"
     assert context.render_messages()[0].to_dict() == {"role": "user", "content": "hello"}
+
+
+def test_context_entry_transport_round_trips_provider_fields() -> None:
+    message = ModelMessage(
+        role="assistant",
+        content="",
+        name="planner",
+        tool_calls=[
+            {
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "write", "arguments": "{}"},
+            }
+        ],
+        extra={"provider": "openai"},
+    )
+
+    entry = ContextEntry.from_message(message, metadata={"source": "provider"})
+    rerendered = entry.to_message()
+
+    assert entry.metadata == {"source": "provider"}
+    assert entry.transport == ContextTransport(
+        name="planner",
+        tool_calls=[
+            {
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "write", "arguments": "{}"},
+            }
+        ],
+        extra={"provider": "openai"},
+    )
+    assert rerendered.name == "planner"
+    assert rerendered.tool_calls[0]["id"] == "call_1"
+    assert rerendered.extra == {"provider": "openai"}
+
+
+def test_context_entry_uses_transport_as_the_only_protocol_state() -> None:
+    entry = ContextEntry(
+        role="tool",
+        text="ok",
+        transport=ContextTransport(
+            name="write",
+            tool_calls=[{"id": "call_1"}],
+            tool_call_id="call_1",
+            extra={"raw": True},
+        ),
+    )
+
+    assert entry.transport.name == "write"
+    assert entry.transport.tool_calls == [{"id": "call_1"}]
+    assert entry.transport.tool_call_id == "call_1"
+    assert entry.transport.extra == {"raw": True}
+
+
+def test_add_response_message_round_trips_provider_message() -> None:
+    context = ConversationBufferContext()
+
+    context.add_response_message(
+        ModelMessage(
+            role="assistant",
+            content="",
+            tool_calls=[
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "write", "arguments": "{}"},
+                }
+            ],
+        )
+    )
+
+    item = context.items[0]
+    assert item.kind == "provider_response"
+    assert item.metadata["source"] == "provider"
+    assert item.transport.tool_calls[0]["id"] == "call_1"
+    assert context.render().messages[0].tool_calls[0]["id"] == "call_1"
+
+
+def test_add_message_keeps_generic_message_semantics() -> None:
+    context = ConversationBufferContext()
+
+    context.add_message(ModelMessage(role="assistant", content="hello"))
+
+    item = context.items[0]
+    assert item.kind == "message"
+    assert item.metadata == {}
 
 
 def test_clear_removes_all_messages() -> None:

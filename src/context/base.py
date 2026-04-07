@@ -53,14 +53,31 @@ class BaseContext(ABC):
         return added_items
 
     def add_message(self, message: ModelMessage) -> ContextEntry:
-        """兼容入口：将 provider ModelMessage 转换为 ContextEntry 后入库。"""
-        return self.add_item(ContextEntry.from_message(message))
+        """将外部消息转换为 ContextEntry 后入库。"""
+        return self.add_item(ContextEntry.from_message(message, kind="message"))
+
+    def add_response_message(self, message: ModelMessage) -> ContextEntry:
+        """接收 provider 返回消息并以响应语义回填到 context。"""
+        return self.add_item(
+            ContextEntry.from_message(
+                message,
+                kind="provider_response",
+                metadata={"source": "provider"},
+            )
+        )
 
     def add_messages(self, messages: Iterable[ModelMessage]) -> list[ContextEntry]:
-        """兼容入口：批量接收 provider ModelMessage。"""
+        """批量接收外部消息并转换为 ContextEntry。"""
         added_items: list[ContextEntry] = []
         for message in messages:
             added_items.append(self.add_message(message))
+        return added_items
+
+    def add_response_messages(self, messages: Iterable[ModelMessage]) -> list[ContextEntry]:
+        """批量接收 provider 返回消息并回填到 context。"""
+        added_items: list[ContextEntry] = []
+        for message in messages:
+            added_items.append(self.add_response_message(message))
         return added_items
 
     def clear(self) -> None:
@@ -84,7 +101,7 @@ class BaseContext(ABC):
         return [message.copy() for message in self.render().messages]
 
     def render_tools(self) -> list[dict[str, Any]]:
-        """返回渲染后的工具 schema 列表。"""
+        """返回最终渲染结果中的工具 schema，等价于 render().tools。"""
         return [dict(tool_schema) for tool_schema in self.render().tools]
 
     def _normalize_item(self, item: ContextEntry) -> ContextEntry:

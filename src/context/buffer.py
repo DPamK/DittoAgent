@@ -37,5 +37,4 @@ class ConversationBufferContext(BaseContext):
         self._items.clear()
 
 
-class BufferContext(ConversationBufferContext):
-    """ConversationBufferContext 的简短别名。"""
+

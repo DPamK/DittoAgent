@@ -73,10 +73,33 @@ def test_tools_context_mixin_registers_tools_and_renders_message() -> None:
     request = context.render()
 
     assert context.get_tool("echo").name == "echo"
+    assert context.render_tools() == request.tools
     assert context.render_tools()[0]["function"]["name"] == "echo"
     assert request.messages[0].role == "user"
     assert request.tools[0]["function"]["name"] == "echo"
     assert context.invoke_tool("echo", text="ping").data == "ping"
+
+
+def test_prompt_tool_mode_does_not_expose_native_tools() -> None:
+    def echo(text: str) -> str:
+        """Echo text."""
+        return text
+
+    class PromptToolContext(ToolsContextMixin, ConversationBufferContext):
+        def build_tool_messages(self) -> list[ModelMessage]:
+            return [ModelMessage(role="system", content="tools available: echo")]
+
+    context = PromptToolContext(
+        tools=[echo],
+        tool_render_mode="prompt",
+        messages=[ModelMessage(role="user", content="hello")],
+    )
+
+    request = context.render()
+
+    assert request.tools == []
+    assert context.render_tools() == []
+    assert request.messages[0].content == "tools available: echo"
 
 
 def test_read_and_write_tools_enforce_base_dir(tmp_path) -> None:

@@ -1,7 +1,7 @@
 """src.context — Context 模块公共接口。"""
 
 from .base import BaseContext
-from .buffer import BufferContext, ConversationBufferContext
+from .buffer import ConversationBufferContext
 from .mixins import (
     MessageMetadataMixin,
     MessageTransformMixin,
@@ -21,13 +21,13 @@ from .tools import (
     function_to_json_schema,
     tool,
 )
-from .types import ContextEntry
+from .types import ContextEntry, ContextTransport
 
 __all__ = [
     "BaseContext",
     "ContextEntry",
+    "ContextTransport",
     "ConversationBufferContext",
-    "BufferContext",
     "MessageTransformMixin",
     "RenderTransformMixin",
     "MessageMetadataMixin",
